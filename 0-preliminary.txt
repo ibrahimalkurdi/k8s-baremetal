@@ -1,0 +1,137 @@
+Preparation:
+#===========
+
+Machine Prepartion:
+--------------------
+1- Create Virtual Machines (3 masters, 3 etcd, 3 workers).
+2- Add my loca machine root ssh-key across all nodes.
+3- Add the hostname of all nodes on all /etc/hosts of all nodes.
+
+SSL prepation:
+---------------
+1- Download the cfssl + cfssljson command.
+
+wget https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
+chmod +x cfssl_linux-amd64
+sudo mv cfssl_linux-amd64 /usr/local/bin/cfssl
+
+wget https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+chmod +x cfssljson_linux-amd64
+sudo mv cfssljson_linux-amd64 /usr/local/bin/cfssljson
+
+2- Create CA CSR config file:
+
+echo '{
+  "signing": {
+    "default": {
+      "expiry": "8760h"
+    },
+    "profiles": {
+      "kubernetes": {
+        "usages": ["signing", "key encipherment", "server auth", "client auth"],
+        "expiry": "8760h"
+      }
+    }
+  }
+}' > ca-config.json
+
+3- Generate CA certificate and CA private key:
+echo '{
+  "CN": "Kubernetes",
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+    {
+      "C": "NO",
+      "L": "Oslo",
+      "O": "Kubernetes",
+      "OU": "CA",
+      "ST": "Oslo"
+    }
+  ]
+}' > ca-csr.json
+
+4- Now, generate CA certificate and it's private key:
+cfssl gencert -initca ca-csr.json | cfssljson -bare ca
+
+
+5- Create Kubernetes certificate CSR config file:
+cat > kubernetes-csr.json <<EOF
+{
+  "CN": "*.k8s.local",
+  "hosts": [
+    "172.16.0.1",
+    "etcd01",
+    "etcd02",
+    "etcd03",
+    "etcd01.k8s.local",
+    "etcd02.k8s.local",
+    "etcd03.k8s.local",
+    "192.168.178.102",
+    "192.168.178.103",
+    "192.168.178.104",
+    "master01",
+    "master02",
+    "master03",
+    "master01.k8s.local",
+    "master02.k8s.local",
+    "master03.k8s.local",
+    "192.168.178.105",
+    "192.168.178.106",
+    "192.168.178.107",
+    "worker01",
+    "worker02",
+    "worker03",
+    "worker04",
+    "worker01.k8s.local",
+    "worker02.k8s.local",
+    "worker03.k8s.local",
+    "worker04.k8s.local",
+    "192.168.178.108",
+    "192.168.178.109",
+    "192.168.178.110",
+    "192.168.178.111",
+    "controller.k8s.local",
+    "kubernetes.k8s.local",
+    "192.168.178.100",
+    "localhost",
+    "127.0.0.1"
+  ],
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+    {
+      "C": "NO",
+      "L": "Oslo",
+      "O": "Kubernetes",
+      "OU": "Cluster",
+      "ST": "Oslo"
+    }
+  ]
+}
+EOF
+
+6- Generate the Kubernetes certificate and private key:
+cfssl gencert \
+  -ca=ca.pem \
+  -ca-key=ca-key.pem \
+  -config=ca-config.json \
+  -profile=kubernetes \
+  kubernetes-csr.json | cfssljson -bare kubernetes
+
+8- Copy the certificates to the nodes:
+for i in lb etcd1 etcd2 controller1 controller2 worker1 worker2; do scp ca.pem kubernetes-key.pem kubernetes.pem  root@${i}:/root/ ; done
+
+9- Get the last k8s version (Strongly recommand the stable):
+curl -sS https://storage.googleapis.com/kubernetes-release/release/stable.txt
+curl -sS https://storage.googleapis.com/kubernetes-release/release/latest.txt
+
+10- Structure of Storge Google API URL from download packages:
+http://storage.googleapis.com/kubernetes-release/release/${K8S_VERSION}/bin/${GOOS}/${GOARCH}/${K8S_BINARY}
+https://storage.googleapis.com/kubernetes-release/release/v1.3.0/bin/linux/amd64/kubectl
+
+# End

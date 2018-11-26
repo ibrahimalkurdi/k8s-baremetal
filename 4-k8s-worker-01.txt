@@ -1,0 +1,335 @@
+woker01
+#--------
+
+Download:
+#--------
+wget https://github.com/coreos/flannel/releases/download/v0.10.0/flanneld-amd64
+chmod +x flanneld-amd64
+mv flanneld-amd64 /usr/local/bin/flanneld
+
+mkdir -p /var/lib/kubernetes
+cp ca.pem kubernetes-key.pem kubernetes.pem /var/lib/kubernetes/
+
+mkdir -p /etc/ssl/etcd/
+cp ca.pem kubernetes-key.pem kubernetes.pem /etc/ssl/etcd/
+
+wget https://download.docker.com/linux/static/stable/x86_64/docker-18.03.0-ce.tgz
+tar -xf docker-18.03.0-ce.tgz
+cp docker/docker* /usr/bin/
+docker version
+
+wget https://storage.googleapis.com/kubernetes-release/release/v1.10.0/bin/linux/amd64/kubectl
+wget https://storage.googleapis.com/kubernetes-release/release/v1.10.0/bin/linux/amd64/kube-proxy
+wget https://storage.googleapis.com/kubernetes-release/release/v1.10.0/bin/linux/amd64/kubelet
+
+chmod +x kubectl kube-proxy kubelet
+mv kubectl kube-proxy kubelet /usr/bin/
+mkdir -p /var/lib/kubelet/
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+# This setup for kubelet without cni:
+sudo sh -c 'apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    certificate-authority: /var/lib/kubernetes/ca.pem
+    server: https://controller.k8s.local:6443
+  name: kubernetes
+contexts:
+- context:
+    cluster: kubernetes
+    user: kubelet
+  name: kubelet
+current-context: kubelet
+users:
+- name: kubelet
+  user:
+    token: chAng3m3 > /var/lib/kubelet/kubeconfig'
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+root@worker02:~# cat /etc/systemd/system/flanneld.service 
+[Unit]
+Description=Network fabric for containers
+Documentation=https://github.com/coreos/flannel
+After=network.target
+After=network-online.target
+Wants=network-online.target
+Before=docker.service
+
+[Service]
+Type=notify
+Restart=always
+RestartSec=5
+ExecStart=/usr/local/bin/flanneld \
+  -etcd-cafile=/etc/ssl/etcd/ca.pem \
+  -etcd-certfile=/etc/ssl/etcd/kubernetes.pem \
+  -etcd-keyfile=/etc/ssl/etcd/kubernetes-key.pem \
+  -etcd-endpoints=https://etcd01:2379,https://etcd02:2379,https://etcd03:2379 \
+  -etcd-prefix=/coreos.com/network \
+  -ip-masq=true
+
+[Install]
+WantedBy=multi-user.target
+RequiredBy=docker.service
+
+
+
+
+sudo systemctl daemon-reload
+sudo systemctl enable flanneld
+sudo systemctl start flanneld
+
+sudo systemctl status flanneld --no-pager
+++++++++++++++++++++++++++++++++++++++++++++
+root@worker02:~# cat /etc/systemd/system/docker.socket 
+[Unit]
+Description=Docker Socket for the API
+PartOf=docker.service
+
+[Socket]
+ListenStream=/var/run/docker.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=root
+
+[Install]
+WantedBy=sockets.target
+
+++++++++++++++++++++++++++++++++++++++++++++
+
+root@worker02:~# cat /etc/systemd/system/docker.service 
+[Unit]
+Description=Docker Application Container Engine
+Documentation=https://docs.docker.com
+After=network-online.target docker.socket flanneld.service
+Wants=network-online.target
+Requires=docker.socket
+
+[Service]
+Type=notify
+EnvironmentFile=/run/flannel/subnet.env
+ExecStart=/usr/bin/dockerd \
+  --bip=${FLANNEL_SUBNET} \
+  --mtu=${FLANNEL_MTU} \
+  --iptables=false \
+  --ip-masq=false \
+  --ip-forward=true \
+  --log-driver=json-file \
+  --log-level=warn \
+  --log-opt=max-file=5 \
+  --log-opt=max-size=10m \
+  --storage-driver=aufs -H fd://
+ExecReload=/bin/kill -s HUP $MAINPID
+LimitNOFILE=1048576
+LimitNPROC=infinity
+LimitCORE=infinity
+TimeoutStartSec=0
+Delegate=yes
+KillMode=process
+Restart=on-failure
+StartLimitBurst=3
+StartLimitInterval=60s
+MountFlags=shared
+
+[Install]
+WantedBy=multi-user.target
+
+
+
+
+sudo systemctl daemon-reload
+sudo systemctl enable docker
+sudo systemctl start docker
+
+sudo systemctl status docker --no-pager
+
+++++++++++++++++++++++++++++++++++++++++
+
+root@worker02:~# cat /etc/systemd/system/kubelet.service 
+[Unit]
+Description=Kubernetes Kubelet
+Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+After=docker.service
+Requires=docker.service
+
+[Service]
+ExecStart=/usr/bin/kubelet \
+--allow-privileged=true \
+--cloud-provider=   \
+--cluster-dns=172.16.1.100   \
+--cluster-domain=cluster.local   \
+--container-runtime=docker   \
+--docker=unix:///var/run/docker.sock   \
+--kubeconfig=/var/lib/kubelet/kubeconfig   \
+--serialize-image-pulls=false   \
+--tls-cert-file=/var/lib/kubernetes/kubernetes.pem   \
+--tls-private-key-file=/var/lib/kubernetes/kubernetes-key.pem \
+--v=2
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+
+
+sudo systemctl daemon-reload
+sudo systemctl enable kubelet
+sudo systemctl start kubelet
+
+sudo systemctl status kubelet --no-pager
++++++++++++++++++++++++++++++++++++++++++++
+
+root@worker02:~# cat /etc/systemd/system/kube-proxy.service 
+[Unit]
+Description=Kubernetes Kube Proxy
+Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+
+[Service]
+ExecStart=/usr/bin/kube-proxy   \
+  --master=https://master01:6443 \
+  --kubeconfig=/var/lib/kubelet/kubeconfig   \
+  --proxy-mode=iptables   \
+  --v=2
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+
+
+sudo systemctl daemon-reload
+sudo systemctl enable kube-proxy
+sudo systemctl start kube-proxy
+
+sudo systemctl status kube-proxy --no-pager
+++++++++++++++++++++++++++++++++++++++++++++
+
+############################################################
+# This setup for kubelet with cni:
+
+# Just change the kubelet + docker systemd configuraiton.
+#1 # we have removed flanneld lines from docker serivce:
+root@worker01:~# cat /etc/systemd/system/docker.service
+[Unit]
+Description=Docker Application Container Engine
+Documentation=https://docs.docker.com
+After=network-online.target docker.socket flanneld.service
+Wants=network-online.target
+Requires=docker.socket
+
+[Service]
+Type=notify
+EnvironmentFile=/run/flannel/subnet.env
+ExecStart=/usr/bin/dockerd \
+  --iptables=false \
+  --ip-masq=false \
+  --ip-forward=true \
+  --log-driver=json-file \
+  --log-level=warn \
+  --log-opt=max-file=5 \
+  --log-opt=max-size=10m \
+  --storage-driver=aufs -H fd://
+ExecReload=/bin/kill -s HUP $MAINPID
+LimitNOFILE=1048576
+LimitNPROC=infinity
+LimitCORE=infinity
+TimeoutStartSec=0
+Delegate=yes
+KillMode=process
+Restart=on-failure
+StartLimitBurst=3
+StartLimitInterval=60s
+MountFlags=shared
+
+[Install]
+WantedBy=multi-user.target
+
+
+#2 # we have removed flanneld lines from docker serivce:
+# First we have to download the cni plugins
+++++++++++++++++++++++++++++++++++++++++++++++++++
+sudo mkdir -p /opt/cni/bin
+
+# for list the cni releases: https://github.com/coreos/flannel-cni/releases
+wget https://storage.googleapis.com/kubernetes-release/network-plugins/cni-c864f0e1ea73719b8f4582402b0847064f9883b0.tar.gz
+
+sudo tar -xvf cni-c864f0e1ea73719b8f4582402b0847064f9883b0.tar.gz -C /opt/cni/bin
+
+
+++++++++++++++++++++++++++++++++++++++++++
+
+mkdir -p /etc/cni/net.d/
+
+root@worker01:~# cat /etc/cni/net.d/10-flannel.conflist 
+{
+  "name": "cbr0",
+  "plugins": [
+    {
+      "type": "flannel",
+      "delegate": {
+        "hairpinMode": true,
+        "isDefaultGateway": true
+      }
+    },
+    {
+      "type": "portmap",
+      "capabilities": {
+        "portMappings": true
+      }
+    }
+  ]
+}
+
+++++++++++++++++++++++++++++++++++++++++++
+root@worker01:~# cat /etc/systemd/system/kubelet.service 
+[Unit]
+Description=Kubernetes Kubelet
+Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+After=docker.service
+Requires=docker.service
+
+[Service]
+ExecStart=/usr/bin/kubelet \
+--allow-privileged=true \
+--cluster-dns=172.16.1.100   \
+--cluster-domain=cluster.local   \
+--network-plugin=cni \
+--cni-conf-dir=/etc/cni/net.d \
+--cni-bin-dir=/opt/cni/bin \
+--kubeconfig=/var/lib/kubelet/kubeconfig   \
+--serialize-image-pulls=false   \
+--tls-cert-file=/var/lib/kubernetes/kubernetes.pem   \
+--tls-private-key-file=/var/lib/kubernetes/kubernetes-key.pem \
+--v=2
+
+--container-runtime=docker   \
+--cloud-provider=   \
+--docker=unix:///var/run/docker.sock   \
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+##########################################################
+
+#
+# END
+#
+
+ExecStart=/usr/bin/docker daemon \
+  --iptables=false \
+  --ip-masq=false \
+  --host=unix:///var/run/docker.sock \
+  --log-level=error \
+  --storage-driver=overlay
+Restart=on-failure
+RestartSec=5
+

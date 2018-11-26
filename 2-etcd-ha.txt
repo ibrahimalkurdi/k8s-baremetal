@@ -1,0 +1,129 @@
+ETCD HA:
+#-------
+1- Prepare ssl directory for etcd certificate:
+mkdir -p /etc/etcd/
+ls /etc/etcd/
+mv ca.pem kubernetes-key.pem kubernetes.pem /etc/etcd/
+
+2- Download etcd binary: 
+# https://github.com/coreos/etcd/releases/
+curl -L https://github.com/coreos/etcd/releases/download/v3.2.18/etcd-v3.2.18-linux-amd64.tar.gz -o etcd-v3.2.18-linux-amd64.tar.gz
+tar xzvf etcd-v3.2.18-linux-amd64.tar.gz
+cp etcd-v3.0.7-linux-amd64/etcd* /usr/bin/
+sudo mkdir -p /var/lib/etcd
+
+3- configuation etcd:
+bob@bob-ThinkPad-T430:~/k8s-hardway/etcd-config$ cat etcd01.service 
+[Unit]
+Description=etcd
+Documentation=https://github.com/coreos
+
+[Service]
+ExecStart=/usr/bin/etcd --name etcd01 \
+  --cert-file=/etc/etcd/kubernetes.pem \
+  --key-file=/etc/etcd/kubernetes-key.pem \
+  --peer-cert-file=/etc/etcd/kubernetes.pem \
+  --peer-key-file=/etc/etcd/kubernetes-key.pem \
+  --trusted-ca-file=/etc/etcd/ca.pem \
+  --peer-trusted-ca-file=/etc/etcd/ca.pem \
+  --initial-advertise-peer-urls https://etcd01.k8s.local:2380 \
+  --listen-peer-urls https://etcd01.k8s.local:2380 \
+  --listen-client-urls https://etcd01.k8s.local:2379,http://127.0.0.1:2379 \
+  --advertise-client-urls https://etcd01.k8s.local:2379 \
+  --initial-cluster-token etcd-cluster-0 \
+  --initial-cluster etcd01=https://etcd01.k8s.local:2380,etcd02=https://etcd02.k8s.local:2380,etcd03=https://etcd03.k8s.local:2380 \
+  --initial-cluster-state new \
+  --data-dir=/var/lib/etcd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+
+
+sudo systemctl daemon-reload
+sudo systemctl enable etcd
+sudo systemctl start etcd
+systemctl status etcd --no-pager
+
+#------------------------------------
+
+bob@bob-ThinkPad-T430:~/k8s-hardway/etcd-config$ cat etcd02.service 
+[Unit]
+Description=etcd
+Documentation=https://github.com/coreos
+
+[Service]
+ExecStart=/usr/bin/etcd --name etcd02 \
+  --cert-file=/etc/etcd/kubernetes.pem \
+  --key-file=/etc/etcd/kubernetes-key.pem \
+  --peer-cert-file=/etc/etcd/kubernetes.pem \
+  --peer-key-file=/etc/etcd/kubernetes-key.pem \
+  --trusted-ca-file=/etc/etcd/ca.pem \
+  --peer-trusted-ca-file=/etc/etcd/ca.pem \
+  --initial-advertise-peer-urls https://etcd02.k8s.local:2380 \
+  --listen-peer-urls https://etcd02.k8s.local:2380 \
+  --listen-client-urls https://etcd02.k8s.local:2379,http://127.0.0.1:2379 \
+  --advertise-client-urls https://etcd02.k8s.local:2379 \
+  --initial-cluster-token etcd-cluster-0 \
+  --initial-cluster etcd01=https://etcd01.k8s.local:2380,etcd02=https://etcd02.k8s.local:2380,etcd03=https://etcd03.k8s.local:2380 \
+  --initial-cluster-state new \
+  --data-dir=/var/lib/etcd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+
+
+sudo systemctl daemon-reload
+sudo systemctl enable etcd
+sudo systemctl start etcd
+systemctl status etcd --no-page
+
+#----------------------------------------
+bob@bob-ThinkPad-T430:~/k8s-hardway/etcd-config$ cat etcd03.service 
+[Unit]
+Description=etcd
+Documentation=https://github.com/coreos
+
+[Service]
+ExecStart=/usr/bin/etcd --name etcd03 \
+  --cert-file=/etc/etcd/kubernetes.pem \
+  --key-file=/etc/etcd/kubernetes-key.pem \
+  --peer-cert-file=/etc/etcd/kubernetes.pem \
+  --peer-key-file=/etc/etcd/kubernetes-key.pem \
+  --trusted-ca-file=/etc/etcd/ca.pem \
+  --peer-trusted-ca-file=/etc/etcd/ca.pem \
+  --initial-advertise-peer-urls https://etcd03.k8s.local:2380 \
+  --listen-peer-urls https://etcd03.k8s.local:2380 \
+  --listen-client-urls https://etcd03.k8s.local:2379,http://127.0.0.1:2379 \
+  --advertise-client-urls https://etcd03.k8s.local:2379 \
+  --initial-cluster-token etcd-cluster-0 \
+  --initial-cluster etcd01=https://etcd01.k8s.local:2380,etcd02=https://etcd02.k8s.local:2380,etcd03=https://etcd03.k8s.local:2380 \
+  --initial-cluster-state new \
+  --data-dir=/var/lib/etcd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+
+sudo systemctl daemon-reload
+sudo systemctl enable etcd
+sudo systemctl start etcd
+systemctl status etcd --no-page
+
+#-----------------------------------------------
+
+4- test the configuration:
+etcdctl --ca-file=/etc/etcd/ca.pem cluster-health
+
+
+
+#
+# END
+#
